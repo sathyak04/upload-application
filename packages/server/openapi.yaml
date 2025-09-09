@@ -1,0 +1,68 @@
+# In packages/server/openapi.yaml
+openapi: 3.0.3
+info:
+  title: 7Sigma Image Uploader API
+  version: 1.0.0
+paths:
+  /api/auth/google:
+    get:
+      summary: Redirects to Google for OAuth sign-in
+      tags: [Auth]
+      operationId: redirectToGoogleAuth
+      responses:
+        '302':
+          description: A redirect to Google's authorization server.
+  /api/auth/google/callback:
+    get:
+      summary: Handles the callback from Google after sign-in
+      tags: [Auth]
+      operationId: handleGoogleCallback
+      responses:
+        '302':
+          description: A redirect back to the frontend application.
+  /api/auth/me:
+    get:
+      summary: Gets the current authenticated user's profile
+      tags: [Auth]
+      operationId: getMe
+      responses:
+        '200':
+          description: The user's profile information.
+        '401':
+          description: Unauthorized.
+  /api/auth/logout:
+    post:
+      summary: Logs the user out
+      tags: [Auth]
+      operationId: logout
+      responses:
+        '200':
+          description: Successfully logged out.
+  /api/images:
+    get:
+      summary: Gets a list of signed URLs for all thumbnails
+      tags: [Images]
+      operationId: getImageList
+      responses:
+        '200':
+          description: An array of secure, temporary URLs for the thumbnails.
+        '401':
+          description: Unauthorized.
+    post:
+      summary: Uploads a new image
+      tags: [Images]
+      operationId: uploadImage
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+      responses:
+        '200':
+          description: The image was uploaded successfully.
+        '401':
+          description: Unauthorized.

@@ -1,0 +1,41 @@
+{
+  "name": "server",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "dev": "ts-node-dev --respawn --transpile-only src/index.ts"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "packageManager": "pnpm@10.15.1",
+  "dependencies": {
+    "@fastify/cookie": "^11.0.2",
+    "@fastify/cors": "^11.1.0",
+    "@fastify/multipart": "^9.2.1",
+    "@fastify/session": "^11.1.0",
+    "@fastify/swagger": "^9.5.1",
+    "@fastify/swagger-ui": "^5.2.3",
+    "@fastify/websocket": "^11.2.0",
+    "@google-cloud/secret-manager": "^6.1.0",
+    "@google-cloud/storage": "^7.17.0",
+    "@trpc/server": "^11.5.1",
+    "dotenv": "^17.2.2",
+    "fastify": "^5.6.0",
+    "fastify-openapi-glue": "^4.9.2",
+    "google-auth-library": "^10.3.0",
+    "uuid": "^12.0.0",
+    "zod": "^4.1.5"
+  },
+  "devDependencies": {
+    "@types/dotenv": "^8.2.3",
+    "@types/node": "^24.3.1",
+    "@types/uuid": "^10.0.0",
+    "@types/ws": "^8.18.1",
+    "openapi-typescript-codegen": "^0.29.0",
+    "ts-node-dev": "^2.0.0",
+    "typescript": "~5.8.3"
+  }
+}
