@@ -4,11 +4,13 @@ import { ImagesService, AuthService } from './apiClient';
 import type { User, ImageData } from './apiClient';
 import { Toaster, toast } from 'sonner';
 
-// This new component handles all WebSocket logic using the native browser API.
+// This component uses the browser's native WebSocket API for real-time updates
 function Notifications({ onMessage }: { onMessage: () => void }) {
   useEffect(() => {
-    // Create a new WebSocket connection when the component mounts
-    const socket = new WebSocket('ws://localhost:3000/ws');
+    // Construct the WebSocket URL from the base API URL
+    const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+    const wsUrl = API_BASE_URL.replace(/^http/, 'ws');
+    const socket = new WebSocket(`${wsUrl}/ws`);
 
     socket.onopen = () => console.log('WebSocket connection established');
 
@@ -175,7 +177,9 @@ function ImageList({ refreshKey }: { refreshKey: number }) {
   }, [refreshKey, fetchImages]);
 
   const handleDelete = async (fullUrl: string) => {
-    const filename = fullUrl.split('/').pop()?.split('?')[0];
+    const filenameWithUser = fullUrl.split('/').slice(-2).join('/');
+    const filename = filenameWithUser.split('?')[0];
+
     if (!filename) {
       toast.error("Could not determine filename to delete.");
       return;
@@ -245,7 +249,6 @@ function Dashboard({ user }: { user: User }) {
         toast.info("Upload Complete", {
           description: "Your image is now being processed.",
         });
-        // We no longer need a timeout here; the WebSocket will trigger the refresh.
       }} />
       <hr />
       <ImageList refreshKey={refreshKey} />
@@ -255,10 +258,11 @@ function Dashboard({ user }: { user: User }) {
 
 // The page shown to users who are not logged in
 function LoginPage() {
+  const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
   return (
     <div>
       <h2>PLEASE LOGIN TO CONTINUE</h2>
-      <a href="http://localhost:3000/api/auth/google">
+      <a href={`${API_BASE_URL}/api/auth/google`}>
         <button>SIGN IN WITH GOOGLE</button>
       </a>
     </div>
