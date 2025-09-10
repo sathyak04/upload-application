@@ -13,16 +13,15 @@ import { pipeline } from 'stream/promises';
 import { OAuth2Client } from 'google-auth-library';
 import secrets, { loadSecrets } from './secrets';
 import path from 'path';
-// --- NEW TRPC IMPORTS ---
 import { fastifyTRPCPlugin } from '@trpc/server/adapters/fastify';
 import { appRouter, createContext } from './trpc';
 
-// --- TYPE DEFINITIONS ---
 export interface UserProfile {
   id: string;
   displayName: string;
   emails?: { value: string }[];
 }
+
 declare module 'fastify' {
   interface Session {
     user?: UserProfile;
@@ -30,80 +29,65 @@ declare module 'fastify' {
 }
 
 const server = Fastify({ logger: true });
-
-// --- GCS & WEBSOCKET SETUP ---
 const storage = new Storage();
-const connections = new Map<string, any>(); 
+const connections = new Map<string, any>();
 
-// --- AUTH MIDDLEWARE ---
 function ensureAuthenticated(request: FastifyRequest, reply: any, done: (err?: Error) => void) {
-  if (request.session.user) {
-    return done();
-  }
+  if (request.session.user) return done();
   reply.code(401).send({ error: 'Unauthorized' });
 }
 
-// --- SERVER STARTUP LOGIC ---
 const start = async () => {
   await loadSecrets();
 
-  // --- PLUGIN REGISTRATION ---
   await server.register(cookie);
   await server.register(session, {
     secret: secrets.SESSION_SECRET!,
     cookie: { secure: false },
   });
+
   await server.register(cors, {
-    origin: 'http://localhost:5173',
+    origin: process.env.CLIENT_URL || 'http://localhost:5173',
     credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'DELETE'], // <-- Add this line
+    methods: ['GET', 'POST', 'PUT', 'DELETE'],
   });
+
   await server.register(multipart, {
-    limits: {
-      fileSize: 5 * 1024 * 1024, // 5 MB max per file
-    },
+    limits: { fileSize: 5 * 1024 * 1024 },
   });
+
   await server.register(websocket);
 
   const oAuth2Client = new OAuth2Client(
     secrets.GOOGLE_CLIENT_ID,
     secrets.GOOGLE_CLIENT_SECRET,
-    'http://localhost:3000/api/auth/google/callback'
+    process.env.GOOGLE_CALLBACK_URL || 'http://localhost:3000/api/auth/google/callback'
   );
 
-  await server.register(swagger, { openapi: { info: { title: '7Sigma Image API', version: '0.1.0' } } });
+  await server.register(swagger, { openapi: { info: { title: 'Image API', version: '1.0.0' } } });
   await server.register(swaggerUi, { routePrefix: '/docs' });
 
-  // --- REGISTER THE TRPC PLUGIN ---
   await server.register(fastifyTRPCPlugin, {
     prefix: '/trpc',
     trpcOptions: { router: appRouter, createContext },
   });
 
-  // --- API ROUTES ---
-
-  // WEBSOCKET ROUTE
+  // WebSocket route
   server.get('/ws', { websocket: true }, (connection, request: FastifyRequest) => {
     const user = (request.session as any).user;
-    if (!user || !user.id) {
-      return connection.close();
-    }
-    server.log.info(`WebSocket opened for user: ${user.displayName}`);
+    if (!user?.id) return connection.close();
     connections.set(user.id, connection);
 
-    connection.on('close', () => {
-      server.log.info(`WebSocket closed for user: ${user.displayName}`);
-      connections.delete(user.id);
-    });
+    connection.on('close', () => connections.delete(user.id));
   });
 
-  // AUTH ROUTES
+  // Auth routes
   server.get('/api/auth/google', (request, reply) => {
-    const authorizeUrl = oAuth2Client.generateAuthUrl({
+    const url = oAuth2Client.generateAuthUrl({
       access_type: 'offline',
-      scope: 'https://www.googleapis.com/auth/userinfo.profile https://www.googleapis.com/auth/userinfo.email',
+      scope: ['https://www.googleapis.com/auth/userinfo.profile', 'https://www.googleapis.com/auth/userinfo.email'],
     });
-    reply.redirect(authorizeUrl);
+    reply.redirect(url);
   });
 
   server.get('/api/auth/google/callback', async (request, reply) => {
@@ -114,172 +98,89 @@ const start = async () => {
       const userInfo = await oAuth2Client.request<{ id: string, name: string, email: string }>({
         url: 'https://www.googleapis.com/oauth2/v2/userinfo',
       });
-      const userProfile: UserProfile = {
+      request.session.user = {
         id: userInfo.data.id,
         displayName: userInfo.data.name,
         emails: [{ value: userInfo.data.email }],
       };
-      request.session.user = userProfile;
-      reply.redirect('http://localhost:5173/');
+      reply.redirect(process.env.CLIENT_URL || 'http://localhost:5173/');
     } catch (err) {
-      console.error("Authentication callback error", err);
-      reply.redirect('http://localhost:5173/login-failed');
+      console.error(err);
+      reply.redirect(`${process.env.CLIENT_URL || 'http://localhost:5173'}/login-failed`);
     }
   });
 
-  server.get('/api/auth/me', { preHandler: [ensureAuthenticated] }, (request, reply) => {
-    return request.session.user;
-  });
+  server.get('/api/auth/me', { preHandler: [ensureAuthenticated] }, (request) => request.session.user);
 
-  server.post('/api/auth/logout', {
-    schema: { 
-      tags: ['auth'],
-      response: {
-        200: { type: 'object', properties: { message: { type: 'string' } } },
-        500: { type: 'object', properties: { message: { type: 'string' } } }
-      }
-    },
-    preHandler: [ensureAuthenticated]
-  }, (request: any, reply) => {
+  server.post('/api/auth/logout', { preHandler: [ensureAuthenticated] }, (request: any, reply) => {
     request.session.destroy((err: any) => {
-      if (err) {
-        reply.status(500).send({ message: 'Could not log out' });
-      } else {
-        reply.send({ message: 'Logged out successfully' });
-      }
+      if (err) reply.status(500).send({ message: 'Could not log out' });
+      else reply.send({ message: 'Logged out successfully' });
     });
   });
 
-  // IMAGE ROUTES
-  server.get('/api/images', {
-    schema: { tags: ['images'], response: { 200: { type: 'array', items: { type: 'object', properties: { thumbnailUrl: { type: 'string' }, fullUrl: { type: 'string' } } } }, 500: { type: 'object', properties: { error: { type: 'string' } } } } },
-    preHandler: [ensureAuthenticated]
-  }, async (request, reply) => {
+  // Image routes
+  server.get('/api/images', { preHandler: [ensureAuthenticated] }, async (request, reply) => {
     const bucketName = process.env.GCS_BUCKET_NAME!;
     try {
       const bucket = storage.bucket(bucketName);
-      const [thumbnailFiles] = await bucket.getFiles({ prefix: 'thumbnails/' });
+      const [files] = await bucket.getFiles({ prefix: 'thumbnails/' });
 
-      const urlPromises = thumbnailFiles
-        .filter(file => !file.name.endsWith('/'))
-        .map(async (thumbnailFile) => {
-          const [thumbnailUrl] = await thumbnailFile.getSignedUrl({
-            version: 'v4',
-            action: 'read',
-            expires: Date.now() + 15 * 60 * 1000,
-          });
-          
-          const fullSizeFilename = thumbnailFile.name.replace('thumbnails/thumb_', '');
-          const fullSizeFile = bucket.file(fullSizeFilename);
-          
-          const [fullUrl] = await fullSizeFile.getSignedUrl({
-            version: 'v4',
-            action: 'read',
-            expires: Date.now() + 15 * 60 * 1000,
-          });
-
-          return { thumbnailUrl, fullUrl };
-        });
-
-      const urls = await Promise.all(urlPromises);
+      const urls = await Promise.all(
+        files
+          .filter(f => !f.name.endsWith('/'))
+          .map(async thumb => {
+            const [thumbUrl] = await thumb.getSignedUrl({ version: 'v4', action: 'read', expires: Date.now() + 15 * 60 * 1000 });
+            const fullFile = bucket.file(thumb.name.replace('thumbnails/thumb_', ''));
+            const [fullUrl] = await fullFile.getSignedUrl({ version: 'v4', action: 'read', expires: Date.now() + 15 * 60 * 1000 });
+            return { thumbnailUrl: thumbUrl, fullUrl };
+          })
+      );
       return urls;
-    } catch (error) {
-      server.log.error(error, "Failed to generate signed URLs from GCS");
-      return reply.status(500).send({ error: 'Failed to retrieve image list.' });
+    } catch (err) {
+      server.log.error(err);
+      return reply.status(500).send({ error: 'Failed to fetch images' });
     }
   });
 
-  server.post('/api/images', {
-    schema: { tags: ['images'] },
-    preHandler: [ensureAuthenticated]
-  }, async (request: any, reply) => {
+  server.post('/api/images', { preHandler: [ensureAuthenticated] }, async (request: any, reply) => {
     const data = await request.file();
-    if (data.file.truncated) {
-      return reply.status(400).send({ error: 'File too large. Max size is 5MB.' });
-    }
-    if (!data) {
-      return reply.status(400).send({ error: 'File is required.' });
+    if (!data || data.file.truncated || !data.mimetype.startsWith('image/')) {
+      return reply.status(400).send({ error: 'Invalid image file (max 5MB).' });
     }
 
-  if (!data.mimetype.startsWith('image/')) {
-    return reply.status(400).send({ error: 'Only image files are allowed.' });
-  }
-
-    const originalFilename = data.filename;
-    const sanitizedFilename = path.basename(originalFilename);
-    const bucketName = process.env.GCS_BUCKET_NAME!;
-    const bucket = storage.bucket(bucketName);
-    
+    const sanitizedFilename = path.basename(data.filename);
+    const bucket = storage.bucket(process.env.GCS_BUCKET_NAME!);
     const file = bucket.file(sanitizedFilename);
-    
     await pipeline(data.file, file.createWriteStream());
-    server.log.info(`Uploaded ${sanitizedFilename} to GCS bucket ${bucketName}`);
 
-    // REAL-TIME NOTIFICATION LOGIC
     setTimeout(() => {
       const userId = request.session.user?.id;
       if (userId && connections.has(userId)) {
-        const connection = connections.get(userId)!;
-        const message = JSON.stringify({
-          type: 'PROCESSING_COMPLETE',
-          filename: sanitizedFilename,
-        });
-        connection.send(message);
-        server.log.info(`Sent WebSocket update to user ${userId} for file ${sanitizedFilename}`);
+        connections.get(userId)!.send(JSON.stringify({ type: 'PROCESSING_COMPLETE', filename: sanitizedFilename }));
       }
     }, 5000);
 
     return { success: true, filename: sanitizedFilename };
   });
 
-  // --- NEW DELETE ROUTE ---
-  server.delete('/api/images/:filename', {
-    schema: { 
-      tags: ['images'],
-      params: {
-        type: 'object',
-        properties: {
-          filename: { type: 'string' }
-        }
-      }
-    },
-    preHandler: [ensureAuthenticated]
-  }, async (request: any, reply) => {
-    const bucketName = process.env.GCS_BUCKET_NAME!;
-    const { filename } = request.params;
-    const sanitizedFilename = path.basename(filename);
-
+  server.delete('/api/images/:filename', { preHandler: [ensureAuthenticated] }, async (request: any, reply) => {
+    const bucket = storage.bucket(process.env.GCS_BUCKET_NAME!);
+    const filename = path.basename(request.params.filename);
     try {
-      const bucket = storage.bucket(bucketName);
-      const fullSizeFile = bucket.file(sanitizedFilename);
-      const thumbnailFile = bucket.file(`thumbnails/thumb_${sanitizedFilename}`);
-
       await Promise.all([
-        fullSizeFile.delete(),
-        thumbnailFile.delete()
+        bucket.file(filename).delete(),
+        bucket.file(`thumbnails/thumb_${filename}`).delete(),
       ]);
-
-      server.log.info(`Deleted ${sanitizedFilename} and its thumbnail successfully.`);
-      return { success: true, message: 'Image and thumbnail deleted successfully.' };
-
-    } catch (error: any) {
-      if (error.code === 404) {
-        server.log.warn(`Attempted to delete non-existent file: ${sanitizedFilename}`);
-        return { success: true, message: 'Image was already deleted or did not exist.' };
-      }
-      server.log.error(error, `Failed to delete image: ${sanitizedFilename}`);
-      return reply.status(500).send({ error: 'Failed to delete image.' });
+      return { success: true, message: 'Image deleted' };
+    } catch (err: any) {
+      if (err.code === 404) return { success: true, message: 'File not found' };
+      return reply.status(500).send({ error: 'Failed to delete image' });
     }
   });
 
-  // Start the server
-  try {
-    const port = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
-    await server.listen({ port, host: '0.0.0.0' });
-  } catch (err) {
-    server.log.error(err);
-    process.exit(1);
-  }
+  const port = parseInt(process.env.PORT || '3000', 10);
+  await server.listen({ port, host: '0.0.0.0' });
 };
 
 start();
