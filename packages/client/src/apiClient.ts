@@ -1,6 +1,5 @@
 // apiClient.ts
 // We manually define the User type, since we know its shape from our backend.
-
 export interface User {
   id: string;
   displayName: string;
@@ -15,8 +14,9 @@ export interface ImageData {
   fullUrl: string;
 }
 
-// Use environment variable or fallback to localhost
-const BASE_URL = process.env.REACT_APP_API_BASE_URL || 'http://localhost:3000';
+// --- THIS IS THE ONLY LINE THAT HAS CHANGED ---
+// It now uses Vite's syntax for environment variables.
+const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 
 // Helper function to handle all our API requests
 async function apiFetch(url: string, options?: RequestInit) {

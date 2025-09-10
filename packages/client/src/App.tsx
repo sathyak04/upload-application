@@ -4,11 +4,15 @@ import { ImagesService, AuthService } from './apiClient';
 import type { User, ImageData } from './apiClient';
 import { Toaster, toast } from 'sonner';
 
-// This component uses the browser's native WebSocket API for real-time updates
+// This new component handles all WebSocket logic using the native browser API.
 function Notifications({ onMessage }: { onMessage: () => void }) {
   useEffect(() => {
+    // Create a new WebSocket connection when the component mounts
     const socket = new WebSocket('ws://localhost:3000/ws');
+
     socket.onopen = () => console.log('WebSocket connection established');
+
+    // This function is called when a message is received from the server
     socket.onmessage = (event) => {
       try {
         const message = JSON.parse(event.data);
@@ -16,20 +20,23 @@ function Notifications({ onMessage }: { onMessage: () => void }) {
           toast.success("Image Processed!", {
             description: `Your image ${message.filename} is ready.`,
           });
-          onMessage();
+          onMessage(); // Tell the parent component to refresh the image list
         }
       } catch (error) {
         console.error('Failed to parse WebSocket message:', error);
       }
     };
+
     socket.onclose = () => console.log('WebSocket connection closed');
     socket.onerror = (error) => console.error('WebSocket error:', error);
+
+    // This cleanup function runs when the component unmounts
     return () => {
       socket.close();
     };
   }, [onMessage]);
 
-  return null;
+  return null; // This component doesn't render anything itself
 }
 
 // Component for uploading a new image, with drag-and-drop + validation
@@ -155,13 +162,17 @@ function ImageList({ refreshKey }: { refreshKey: number }) {
   const [images, setImages] = useState<ImageData[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
-  useEffect(() => {
+  const fetchImages = useCallback(() => {
     setIsLoading(true);
     ImagesService.getImages()
       .then(imageData => setImages(imageData))
       .catch(err => console.error("Could not fetch images", err))
       .finally(() => setIsLoading(false));
-  }, [refreshKey]);
+  }, []);
+
+  useEffect(() => {
+    fetchImages();
+  }, [refreshKey, fetchImages]);
 
   const handleDelete = async (fullUrl: string) => {
     const filename = fullUrl.split('/').pop()?.split('?')[0];
@@ -199,18 +210,9 @@ function ImageList({ refreshKey }: { refreshKey: number }) {
             <button
               onClick={() => handleDelete(image.fullUrl)}
               style={{
-                position: 'absolute',
-                top: '5px',
-                right: '5px',
-                background: 'rgba(0, 0, 0, 0.6)',
-                color: 'white',
-                border: 'none',
-                borderRadius: '50%',
-                width: '30px',
-                height: '30px',
-                cursor: 'pointer',
-                fontSize: '18px',
-                lineHeight: '30px'
+                position: 'absolute', top: '5px', right: '5px', background: 'rgba(0, 0, 0, 0.6)',
+                color: 'white', border: 'none', borderRadius: '50%', width: '30px', height: '30px',
+                cursor: 'pointer', fontSize: '18px', lineHeight: '30px'
               }}
             >
               &times;
@@ -243,7 +245,7 @@ function Dashboard({ user }: { user: User }) {
         toast.info("Upload Complete", {
           description: "Your image is now being processed.",
         });
-        triggerRefresh();
+        // We no longer need a timeout here; the WebSocket will trigger the refresh.
       }} />
       <hr />
       <ImageList refreshKey={refreshKey} />
