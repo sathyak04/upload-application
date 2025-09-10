@@ -194,7 +194,7 @@ function ImageList({ refreshKey }: { refreshKey: number }) {
 
   return (
     <>
-      <h3>YOUR THUMBNAILS:</h3>
+      <h3>CLICK ON THUMBNAIL TO VIEW YOUR IMAGE:</h3>
       {images.length === 0 ? <p>NO THUMBNAILS FOUND. UPLOAD AN IMAGE TO SEE ONE!</p> : null}
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '1rem', justifyContent: 'center' }}>
         {images.map((image) => (
