@@ -1,40 +1,38 @@
-# --- Stage 1: The Builder ---
-# This stage installs all dependencies and builds our TypeScript code
-FROM node:20-slim AS builder
+    # --- Stage 1: The Builder ---
+    # This stage will install all dependencies and build the TypeScript code.
+    FROM node:20-slim AS builder
 
-WORKDIR /app
+    WORKDIR /app
 
-# Copy root pnpm files
-COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+    # Install pnpm globally in the container
+    RUN npm install -g pnpm
 
-# Install pnpm itself
-RUN npm install -g pnpm
+    # Copy the entire project context into the builder
+    COPY . .
 
-# Copy the package.json files for all workspaces to leverage caching
-COPY packages/server/package.json ./packages/server/
-COPY packages/client/package.json ./packages/client/
+    # Install ALL dependencies for the entire monorepo (including dev dependencies)
+    RUN pnpm install
 
-# Install ALL dependencies (including dev dependencies needed for the build)
-RUN pnpm install
+    # Run the "build" script specifically for the 'server' package
+    RUN pnpm --filter server build
 
-# Now copy the rest of the source code
-COPY . .
-
-# Run the "build" script we just added to our server's package.json
-RUN pnpm --filter server build
+    # After the build is complete, remove all development dependencies to keep the
+    # final image small.
+    RUN pnpm prune --prod
 
 
-# --- Stage 2: The Final Production Image ---
-# This stage creates a smaller, cleaner image for running the application
-FROM node:20-slim
+    # --- Stage 2: The Final Production Image ---
+    # This stage will create a small, clean image with only what's needed to run.
+    FROM node:20-slim
 
-WORKDIR /app
+    WORKDIR /app
 
-# Copy the necessary files from the 'builder' stage
-COPY --from=builder /app .
+    # Copy the entire pruned project (with built code and production node_modules)
+    # from the 'builder' stage.
+    COPY --from=builder /app .
 
-# Expose the port the server will run on
-EXPOSE 3000
+    # Expose the port that the server will run on
+    EXPOSE 3000
 
-# The command to start the server. Note the path to the built output.
-CMD ["node", "packages/server/dist/index.js"]
+    # The command to start the server. Note the path to the final built JavaScript file.
+    CMD ["node", "packages/server/dist/index.js"]
