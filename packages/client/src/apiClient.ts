@@ -1,4 +1,6 @@
+// apiClient.ts
 // We manually define the User type, since we know its shape from our backend.
+
 export interface User {
   id: string;
   displayName: string;
@@ -13,11 +15,14 @@ export interface ImageData {
   fullUrl: string;
 }
 
+// Use environment variable or fallback to localhost
+const BASE_URL = process.env.REACT_APP_API_BASE_URL || 'http://localhost:3000';
+
 // Helper function to handle all our API requests
 async function apiFetch(url: string, options?: RequestInit) {
-  const response = await fetch(`http://localhost:3000${url}`, {
+  const response = await fetch(`${BASE_URL}${url}`, {
     ...options,
-    credentials: 'include',
+    credentials: 'include', // send cookies for session auth
   });
 
   const isFormData = options?.body instanceof FormData;
@@ -30,6 +35,7 @@ async function apiFetch(url: string, options?: RequestInit) {
   if (response.status === 204) {
     return null;
   }
+
   if (isFormData) {
     return response.json().catch(() => ({}));
   }
