@@ -12,6 +12,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { pipeline } from 'stream/promises';
 import { OAuth2Client } from 'google-auth-library';
 import secrets, { loadSecrets } from './secrets';
+import path from 'path';
 // --- NEW TRPC IMPORTS ---
 import { fastifyTRPCPlugin } from '@trpc/server/adapters/fastify';
 import { appRouter, createContext } from './trpc';
@@ -55,8 +56,13 @@ const start = async () => {
   await server.register(cors, {
     origin: 'http://localhost:5173',
     credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE'], // <-- Add this line
   });
-  await server.register(multipart);
+  await server.register(multipart, {
+    limits: {
+      fileSize: 5 * 1024 * 1024, // 5 MB max per file
+    },
+  });
   await server.register(websocket);
 
   const oAuth2Client = new OAuth2Client(
@@ -146,22 +152,36 @@ const start = async () => {
 
   // IMAGE ROUTES
   server.get('/api/images', {
-    schema: { tags: ['images'], response: { 200: { type: 'array', items: { type: 'string' } }, 500: { type: 'object', properties: { error: { type: 'string' } } } } },
+    schema: { tags: ['images'], response: { 200: { type: 'array', items: { type: 'object', properties: { thumbnailUrl: { type: 'string' }, fullUrl: { type: 'string' } } } }, 500: { type: 'object', properties: { error: { type: 'string' } } } } },
     preHandler: [ensureAuthenticated]
   }, async (request, reply) => {
     const bucketName = process.env.GCS_BUCKET_NAME!;
     try {
       const bucket = storage.bucket(bucketName);
-      const [files] = await bucket.getFiles({ prefix: 'thumbnails/' });
-      const signedUrlPromises = files
+      const [thumbnailFiles] = await bucket.getFiles({ prefix: 'thumbnails/' });
+
+      const urlPromises = thumbnailFiles
         .filter(file => !file.name.endsWith('/'))
-        .map(file => file.getSignedUrl({
+        .map(async (thumbnailFile) => {
+          const [thumbnailUrl] = await thumbnailFile.getSignedUrl({
             version: 'v4',
             action: 'read',
             expires: Date.now() + 15 * 60 * 1000,
-        }));
-      const signedUrlArrays = await Promise.all(signedUrlPromises);
-      const urls = signedUrlArrays.flat();
+          });
+          
+          const fullSizeFilename = thumbnailFile.name.replace('thumbnails/thumb_', '');
+          const fullSizeFile = bucket.file(fullSizeFilename);
+          
+          const [fullUrl] = await fullSizeFile.getSignedUrl({
+            version: 'v4',
+            action: 'read',
+            expires: Date.now() + 15 * 60 * 1000,
+          });
+
+          return { thumbnailUrl, fullUrl };
+        });
+
+      const urls = await Promise.all(urlPromises);
       return urls;
     } catch (error) {
       server.log.error(error, "Failed to generate signed URLs from GCS");
@@ -174,16 +194,26 @@ const start = async () => {
     preHandler: [ensureAuthenticated]
   }, async (request: any, reply) => {
     const data = await request.file();
+    if (data.file.truncated) {
+      return reply.status(400).send({ error: 'File too large. Max size is 5MB.' });
+    }
     if (!data) {
       return reply.status(400).send({ error: 'File is required.' });
     }
+
+  if (!data.mimetype.startsWith('image/')) {
+    return reply.status(400).send({ error: 'Only image files are allowed.' });
+  }
+
+    const originalFilename = data.filename;
+    const sanitizedFilename = path.basename(originalFilename);
     const bucketName = process.env.GCS_BUCKET_NAME!;
-    const extension = data.filename.split('.').pop();
-    const uniqueFilename = `${uuidv4()}.${extension}`;
     const bucket = storage.bucket(bucketName);
-    const file = bucket.file(uniqueFilename);
+    
+    const file = bucket.file(sanitizedFilename);
+    
     await pipeline(data.file, file.createWriteStream());
-    server.log.info(`Uploaded ${uniqueFilename} to GCS bucket ${bucketName}`);
+    server.log.info(`Uploaded ${sanitizedFilename} to GCS bucket ${bucketName}`);
 
     // REAL-TIME NOTIFICATION LOGIC
     setTimeout(() => {
@@ -192,14 +222,54 @@ const start = async () => {
         const connection = connections.get(userId)!;
         const message = JSON.stringify({
           type: 'PROCESSING_COMPLETE',
-          filename: uniqueFilename,
+          filename: sanitizedFilename,
         });
         connection.send(message);
-        server.log.info(`Sent WebSocket update to user ${userId} for file ${uniqueFilename}`);
+        server.log.info(`Sent WebSocket update to user ${userId} for file ${sanitizedFilename}`);
       }
     }, 5000);
 
-    return { success: true, filename: uniqueFilename };
+    return { success: true, filename: sanitizedFilename };
+  });
+
+  // --- NEW DELETE ROUTE ---
+  server.delete('/api/images/:filename', {
+    schema: { 
+      tags: ['images'],
+      params: {
+        type: 'object',
+        properties: {
+          filename: { type: 'string' }
+        }
+      }
+    },
+    preHandler: [ensureAuthenticated]
+  }, async (request: any, reply) => {
+    const bucketName = process.env.GCS_BUCKET_NAME!;
+    const { filename } = request.params;
+    const sanitizedFilename = path.basename(filename);
+
+    try {
+      const bucket = storage.bucket(bucketName);
+      const fullSizeFile = bucket.file(sanitizedFilename);
+      const thumbnailFile = bucket.file(`thumbnails/thumb_${sanitizedFilename}`);
+
+      await Promise.all([
+        fullSizeFile.delete(),
+        thumbnailFile.delete()
+      ]);
+
+      server.log.info(`Deleted ${sanitizedFilename} and its thumbnail successfully.`);
+      return { success: true, message: 'Image and thumbnail deleted successfully.' };
+
+    } catch (error: any) {
+      if (error.code === 404) {
+        server.log.warn(`Attempted to delete non-existent file: ${sanitizedFilename}`);
+        return { success: true, message: 'Image was already deleted or did not exist.' };
+      }
+      server.log.error(error, `Failed to delete image: ${sanitizedFilename}`);
+      return reply.status(500).send({ error: 'Failed to delete image.' });
+    }
   });
 
   // Start the server

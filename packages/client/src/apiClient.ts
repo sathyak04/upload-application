@@ -8,6 +8,11 @@ export interface User {
   }>;
 }
 
+export interface ImageData {
+  thumbnailUrl: string;
+  fullUrl: string;
+}
+
 // Helper function to handle all our API requests
 async function apiFetch(url: string, options?: RequestInit) {
   const response = await fetch(`http://localhost:3000${url}`, {
@@ -15,7 +20,6 @@ async function apiFetch(url: string, options?: RequestInit) {
     credentials: 'include',
   });
 
-  // Check if the request body was FormData
   const isFormData = options?.body instanceof FormData;
 
   if (!response.ok) {
@@ -23,12 +27,9 @@ async function apiFetch(url: string, options?: RequestInit) {
     throw new Error(errorBody.error || `Request failed with status ${response.status}`);
   }
 
-  // Handle successful responses that might not have a JSON body
-  if (response.status === 204) { // 204 No Content
+  if (response.status === 204) {
     return null;
   }
-  // Successful FormData uploads might return a body, or might not. 
-  // We try to parse JSON but return an empty object on failure.
   if (isFormData) {
     return response.json().catch(() => ({}));
   }
@@ -48,17 +49,23 @@ export const AuthService = {
 };
 
 export const ImagesService = {
-  getImages: (): Promise<string[]> => {
+  getImages: (): Promise<ImageData[]> => {
     return apiFetch('/api/images');
   },
-  // THIS IS THE NEW FUNCTION FOR PHASE 3
+  
   uploadImage: (file: File): Promise<{ success: boolean; filename: string }> => {
     const formData = new FormData();
-    // The key 'file' must match the key the backend expects
     formData.append('file', file, file.name);
     return apiFetch('/api/images', {
       method: 'POST',
       body: formData,
+    });
+  },
+
+  deleteImage: (filename: string): Promise<{ success: boolean }> => {
+    const encodedFilename = encodeURIComponent(filename);
+    return apiFetch(`/api/images/${encodedFilename}`, {
+      method: 'DELETE',
     });
   },
 };

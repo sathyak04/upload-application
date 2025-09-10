@@ -26,3 +26,4 @@ google-credentials.json
 *.njsproj
 *.sln
 *.sw?
+/generated/prisma
