@@ -7,14 +7,11 @@ import { Toaster, toast } from 'sonner';
 // This component uses the browser's native WebSocket API for real-time updates
 function Notifications({ onMessage }: { onMessage: () => void }) {
   useEffect(() => {
-    // Construct the WebSocket URL from the base API URL
     const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
     const wsUrl = API_BASE_URL.replace(/^http/, 'ws');
     const socket = new WebSocket(`${wsUrl}/ws`);
 
     socket.onopen = () => console.log('WebSocket connection established');
-
-    // This function is called when a message is received from the server
     socket.onmessage = (event) => {
       try {
         const message = JSON.parse(event.data);
@@ -22,23 +19,20 @@ function Notifications({ onMessage }: { onMessage: () => void }) {
           toast.success("Image Processed!", {
             description: `Your image ${message.filename} is ready.`,
           });
-          onMessage(); // Tell the parent component to refresh the image list
+          onMessage();
         }
       } catch (error) {
         console.error('Failed to parse WebSocket message:', error);
       }
     };
-
     socket.onclose = () => console.log('WebSocket connection closed');
     socket.onerror = (error) => console.error('WebSocket error:', error);
-
-    // This cleanup function runs when the component unmounts
     return () => {
       socket.close();
     };
   }, [onMessage]);
 
-  return null; // This component doesn't render anything itself
+  return null;
 }
 
 // Component for uploading a new image, with drag-and-drop + validation
@@ -124,7 +118,7 @@ function ImageUploader({ onUploadSuccess }: { onUploadSuccess: () => void }) {
             backgroundColor: isDragging ? '#f0f0f0' : 'transparent',
             cursor: 'pointer',
           }}
-          onClick={() => document.getElementById('fileInput')?.click()} // opens explorer
+          onClick={() => document.getElementById('fileInput')?.click()}
         >
           {file ? (
             <p>{file.name}</p>
@@ -177,7 +171,8 @@ function ImageList({ refreshKey }: { refreshKey: number }) {
   }, [refreshKey, fetchImages]);
 
   const handleDelete = async (fullUrl: string) => {
-    const filenameWithUser = fullUrl.split('/').slice(-2).join('/');
+    const urlParts = fullUrl.split('/');
+    const filenameWithUser = urlParts.slice(urlParts.length - 2).join('/');
     const filename = filenameWithUser.split('?')[0];
 
     if (!filename) {
@@ -245,6 +240,13 @@ function Dashboard({ user }: { user: User }) {
       <p>YOUR E-MAIL IS: {user.emails?.[0].value.toUpperCase()}</p>
       <button onClick={handleLogout}>LOGOUT</button>
       <hr />
+      
+      <div className="my-6 p-4 bg-red-100 border border-red-400 text-red-700 rounded-lg text-center">
+          <p className="font-bold text-lg uppercase">
+              Do not upload anything sensitive. Uploads are public for all users. This is for presentation purposes only. Please delete sensitive images when you are finished. Any images older than a day are automatically deleted.
+          </p>
+      </div>
+      
       <ImageUploader onUploadSuccess={() => {
         toast.info("Upload Complete", {
           description: "Your image is now being processed.",
@@ -265,6 +267,16 @@ function LoginPage() {
       <a href={`${API_BASE_URL}/api/auth/google`}>
         <button>SIGN IN WITH GOOGLE</button>
       </a>
+
+      {/* --- ADDED SEPARATOR --- */}
+      <hr className="my-6" />
+
+      {/* --- WARNING MESSAGE (margin top removed) --- */}
+      <div className="p-4 bg-red-100 border border-red-400 text-red-700 rounded-lg text-center">
+          <p className="font-bold text-lg uppercase">
+              Do not upload anything sensitive. Uploads are public for all users. This is for presentation purposes only. Please delete sensitive images when you are finished. Any images older than a day are automatically deleted.
+          </p>
+      </div>
     </div>
   );
 }
